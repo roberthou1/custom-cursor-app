@@ -56,3 +56,6 @@ venv.bak/
 
 # Allow DMG files in the website/downloads directory
 !website/downloads/*.dmg
+
+# Local Netlify folder
+.netlify

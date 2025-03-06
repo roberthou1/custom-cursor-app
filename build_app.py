@@ -113,10 +113,149 @@ def main():
     parser.add_argument("--name", default="Custom Cursors", help="Name of the output executable")
     parser.add_argument("--optimize", action="store_true", default=True, help="Apply size optimizations")
     parser.add_argument("--skip-security-fix", action="store_true", help="Skip macOS security fixes")
+    parser.add_argument("--create-dmg", action="store_true", help="Create a DMG file for macOS distribution")
     args = parser.parse_args()
     
     # Determine platform
     system = platform.system()
+    
+    # Handle DMG creation request
+    if args.create_dmg and system == "Darwin":
+        print("Creating DMG file for macOS distribution...")
+        app_path = Path(f"dist/{args.name}.app")
+        if not app_path.exists():
+            print(f"Error: {app_path} does not exist. Please build the app first.")
+            return 1
+            
+        # Create DMG file
+        try:
+            # Create temporary directory for DMG contents
+            dmg_temp_dir = Path("dmg_temp")
+            if dmg_temp_dir.exists():
+                shutil.rmtree(dmg_temp_dir)
+            dmg_temp_dir.mkdir(exist_ok=True)
+            
+            # Copy the app to the temporary directory
+            print("Copying app to temporary directory...")
+            shutil.copytree(app_path, dmg_temp_dir / os.path.basename(app_path), symlinks=True, dirs_exist_ok=True)
+            
+            # Apply additional code signing to the copied app
+            print("Applying additional code signing to the app in DMG...")
+            copied_app = dmg_temp_dir / os.path.basename(app_path)
+            subprocess.run([
+                "codesign", 
+                "--force", 
+                "--deep", 
+                "--sign", "-", 
+                str(copied_app)
+            ], check=True)
+            
+            # Create a symbolic link to /Applications
+            applications_link = dmg_temp_dir / "Applications"
+            if applications_link.exists():
+                os.unlink(applications_link)
+            os.symlink("/Applications", applications_link)
+            
+            # Create a background image for the DMG
+            print("Creating DMG background image with installation instructions...")
+            backgrounds_dir = dmg_temp_dir / ".background"
+            backgrounds_dir.mkdir(exist_ok=True)
+            
+            # Create a simple background image with instructions
+            from PIL import Image, ImageDraw, ImageFont
+            
+            # Create a background image with instructions
+            bg_img = Image.new('RGBA', (600, 400), color=(240, 240, 240, 255))
+            draw = ImageDraw.Draw(bg_img)
+            
+            # Try to use a nice font if available, otherwise use default
+            try:
+                # Check for common macOS fonts
+                font_path = "/System/Library/Fonts/Supplemental/Arial.ttf"
+                if not os.path.exists(font_path):
+                    font_path = "/System/Library/Fonts/Helvetica.ttc"
+                
+                title_font = ImageFont.truetype(font_path, 24)
+                instruction_font = ImageFont.truetype(font_path, 16)
+            except Exception:
+                # Use default font if custom font fails
+                title_font = None
+                instruction_font = None
+            
+            # Draw title
+            draw.text((300, 30), "Install Custom Cursors", fill=(50, 50, 50), font=title_font, anchor="mt")
+            
+            # Draw arrow pointing from app to Applications folder
+            arrow_points = [
+                (230, 200),  # Start
+                (370, 200),  # End
+                (350, 190),  # Arrow head top
+                (370, 200),  # Arrow head point
+                (350, 210)   # Arrow head bottom
+            ]
+            draw.line(arrow_points[:2], fill=(66, 191, 191), width=3)
+            draw.polygon(arrow_points[2:], fill=(66, 191, 191))
+            
+            # Draw instructions
+            instructions = "Drag Custom Cursors to the Applications folder"
+            draw.text((300, 240), instructions, fill=(50, 50, 50), font=instruction_font, anchor="mt")
+            
+            # Save the background image
+            bg_path = backgrounds_dir / "background.png"
+            bg_img.save(bg_path)
+            
+            # Create the DMG file with standard format (UDZO is more compatible)
+            dmg_path = f"dist/{args.name}.dmg"
+            print(f"Creating DMG at {dmg_path}...")
+            try:
+                subprocess.run([
+                    "hdiutil", "create", 
+                    "-volname", "Custom Cursors", 
+                    "-srcfolder", dmg_temp_dir,
+                    "-ov", "-format", "UDZO",  # Use zlib compression (more compatible)
+                    "-fs", "HFS+",
+                    dmg_path
+                ], check=True)
+                print(f"DMG created successfully at {dmg_path}")
+                
+                # Copy the DMG to the website downloads folder
+                website_downloads = Path("website/downloads")
+                website_downloads.mkdir(exist_ok=True, parents=True)
+                shutil.copy(dmg_path, website_downloads / "Custom Cursors.dmg")
+                print(f"DMG copied to website downloads folder")
+                
+            except Exception as e:
+                print(f"Warning: Could not create DMG: {e}")
+                # Fallback to simple DMG creation without fancy formatting
+                try:
+                    print("Trying simplified DMG creation...")
+                    subprocess.run([
+                        "hdiutil", "create", 
+                        "-volname", "Custom Cursors", 
+                        "-srcfolder", dmg_temp_dir,
+                        "-ov", "-format", "UDZO",
+                        dmg_path
+                    ], check=True)
+                    print(f"Simple DMG created successfully at {dmg_path}")
+                    
+                    # Copy the DMG to the website downloads folder
+                    website_downloads = Path("website/downloads")
+                    website_downloads.mkdir(exist_ok=True, parents=True)
+                    shutil.copy(dmg_path, website_downloads / "Custom Cursors.dmg")
+                    print(f"DMG copied to website downloads folder")
+                    
+                except Exception as e2:
+                    print(f"Failed to create DMG: {e2}")
+            
+            # Clean up
+            shutil.rmtree(dmg_temp_dir, ignore_errors=True)
+            
+            print("DMG creation completed successfully!")
+            return 0
+            
+        except Exception as e:
+            print(f"Error creating DMG: {e}")
+            return 1
     
     # Ensure PyInstaller is installed with the fix for PyQt6 6.5+ on macOS
     try:
@@ -236,6 +375,42 @@ def main():
     # Add data files
     build_cmd.extend(["--add-data", f"README.md:."])
     
+    # Add additional PyInstaller options to help with module imports
+    build_cmd.extend([
+        "--runtime-hook", "runtime_hook.py",
+        "--hidden-import=custom_cursor_app",
+        "--hidden-import=custom_cursor_app.app",
+        "--hidden-import=struct",
+        "--hidden-import=_struct",
+        "--hidden-import=importlib",
+        "--hidden-import=importlib.util",
+        "--hidden-import=logging",
+        "--hidden-import=glob",
+        "--add-data", "src/custom_cursor_app:custom_cursor_app",
+        # Use custom hook file for _struct module
+        "--additional-hooks-dir", "."
+    ])
+    
+    # Create a runtime hook to help with imports
+    with open("runtime_hook.py", "w") as f:
+        f.write("""
+import os
+import sys
+import importlib.util
+
+# Add the application directory to sys.path
+if getattr(sys, 'frozen', False):
+    # We are running in a bundle
+    bundle_dir = os.path.dirname(sys.executable)
+    # Add bundle directory to path
+    if bundle_dir not in sys.path:
+        sys.path.insert(0, bundle_dir)
+    # Add Resources directory to path (for macOS)
+    resources_dir = os.path.join(os.path.dirname(sys.executable), '..', 'Resources')
+    if os.path.exists(resources_dir) and resources_dir not in sys.path:
+        sys.path.insert(0, resources_dir)
+""")
+    
     # Platform-specific options with more aggressive optimizations
     if system == "Windows":
         print("Building for Windows...")
@@ -290,6 +465,10 @@ def main():
     
     # Add main script path
     build_cmd.append("src/main.py")
+    
+    # Print the final build command for debugging
+    print("\nFinal build command:")
+    print(" ".join(build_cmd))
     
     # Run PyInstaller
     print(f"Running: {' '.join(build_cmd)}")
@@ -514,9 +693,11 @@ def main():
                 instructions = "Drag Custom Cursors to the Applications folder"
                 draw.text((300, 240), instructions, fill=(50, 50, 50), font=instruction_font, anchor="mt")
                 
-                # Add security note
-                security_note = "After installation, right-click (or Control+click) on the app\nand select 'Open' to bypass the security warning."
-                draw.text((300, 300), security_note, fill=(100, 100, 100), font=instruction_font, anchor="mt", align="center")
+                # Add security note - split into multiple lines to avoid anchor issues
+                security_note_line1 = "After installation, right-click (or Control+click) on the app"
+                security_note_line2 = "and select 'Open' to bypass the security warning."
+                draw.text((300, 300), security_note_line1, fill=(100, 100, 100), font=instruction_font, anchor="mt")
+                draw.text((300, 325), security_note_line2, fill=(100, 100, 100), font=instruction_font, anchor="mt")
                 
                 # Save the background image
                 bg_path = backgrounds_dir / "background.png"
@@ -555,14 +736,31 @@ def main():
                 # Create the DMG file with standard format (UDZO is more compatible)
                 dmg_path = f"dist/{args.name}.dmg"
                 print(f"Creating DMG at {dmg_path}...")
-                subprocess.run([
-                    "hdiutil", "create", 
-                    "-volname", "Custom Cursors", 
-                    "-srcfolder", dmg_temp_dir,
-                    "-ov", "-format", "UDZO",  # Use zlib compression (more compatible)
-                    "-fs", "HFS+",
-                    dmg_path
-                ], check=True)
+                try:
+                    subprocess.run([
+                        "hdiutil", "create", 
+                        "-volname", "Custom Cursors", 
+                        "-srcfolder", dmg_temp_dir,
+                        "-ov", "-format", "UDZO",  # Use zlib compression (more compatible)
+                        "-fs", "HFS+",
+                        dmg_path
+                    ], check=True)
+                    print(f"DMG created successfully at {dmg_path}")
+                except Exception as e:
+                    print(f"Warning: Could not create DMG: {e}")
+                    # Fallback to simple DMG creation without fancy formatting
+                    try:
+                        print("Trying simplified DMG creation...")
+                        subprocess.run([
+                            "hdiutil", "create", 
+                            "-volname", "Custom Cursors", 
+                            "-srcfolder", dmg_temp_dir,
+                            "-ov", "-format", "UDZO",
+                            dmg_path
+                        ], check=True)
+                        print(f"Simple DMG created successfully at {dmg_path}")
+                    except Exception as e2:
+                        print(f"Failed to create DMG: {e2}")
                 
                 # Remove quarantine attribute from the DMG itself
                 print("Removing quarantine attribute from DMG...")
