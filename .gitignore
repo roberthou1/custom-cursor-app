@@ -7,7 +7,9 @@ __pycache__/
 build/
 develop-eggs/
 dist/
-downloads/
+# Exclude Python downloads but not website/downloads
+/downloads/
+!website/downloads/
 eggs/
 .eggs/
 lib/
