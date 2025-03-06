@@ -216,6 +216,30 @@ header {
     opacity: 0.7;
 }
 
+.security-note {
+    margin-top: 15px;
+    padding: 10px 15px;
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    border-left: 3px solid var(--accent-color);
+}
+
+.security-note ol {
+    margin-top: 8px;
+    margin-left: 20px;
+    color: var(--text-light);
+}
+
+.security-note li {
+    margin-bottom: 5px;
+}
+
+.security-note p {
+    color: var(--text-light);
+    line-height: 1.4;
+}
+
 /* Download Section */
 .download-section {
     position: relative;
@@ -295,6 +319,107 @@ header {
     font-size: 0.9rem;
     color: rgba(255, 255, 255, 0.7);
     margin-top: 15px;
+}
+
+/* How to Use Section */
+.how-to-use {
+    background-color: var(--secondary-color);
+    padding: 80px 0;
+    position: relative;
+}
+
+.how-to-use .section-title {
+    color: var(--primary-color);
+    text-align: center;
+    margin-bottom: 50px;
+    font-size: 2.2rem;
+    font-weight: 700;
+    position: relative;
+    display: inline-block;
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.how-to-use .section-title::after {
+    content: '';
+    position: absolute;
+    bottom: -10px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 50px;
+    height: 3px;
+    background-color: var(--primary-color);
+    border-radius: 3px;
+}
+
+.steps {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 30px;
+    max-width: 1000px;
+    margin: 0 auto;
+}
+
+.step {
+    flex: 1;
+    min-width: 280px;
+    background-color: var(--background);
+    border-radius: var(--radius-md);
+    padding: 30px;
+    box-shadow: var(--shadow-md);
+    position: relative;
+    transition: var(--transition-normal);
+}
+
+.step:hover {
+    transform: translateY(-5px);
+    box-shadow: var(--shadow-lg);
+}
+
+.step-number {
+    position: absolute;
+    top: -20px;
+    left: 30px;
+    width: 40px;
+    height: 40px;
+    background-color: var(--primary-color);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.2rem;
+    box-shadow: var(--shadow-sm);
+}
+
+.step-content {
+    margin-top: 10px;
+}
+
+.step h4 {
+    color: var(--primary-color);
+    margin-bottom: 10px;
+    font-size: 1.2rem;
+}
+
+.step p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
+/* Media query for steps */
+@media (max-width: 768px) {
+    .steps {
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .step {
+        width: 100%;
+        max-width: 350px;
+    }
 }
 
 footer {

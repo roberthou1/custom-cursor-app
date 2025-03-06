@@ -104,9 +104,13 @@ class CursorOverlay(QWidget):
 class CustomCursorApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Custom Cursor App")
+        self.setWindowTitle("Custom Cursors")
         self.setMinimumSize(500, 600)
         
+        # Set application name for proper macOS integration
+        QApplication.setApplicationName("Custom Cursors")
+        QApplication.setOrganizationName("CustomCursor")
+        QApplication.setOrganizationDomain("customcursorapp.com")      
         # Initialize variables
         self.current_image_path = None
         self.hotspot_x = 0

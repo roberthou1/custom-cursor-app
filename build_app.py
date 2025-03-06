@@ -110,20 +110,43 @@ def main():
     parser.add_argument("--onedir", action="store_true", help="Build as directory instead of single file")
     parser.add_argument("--debug", action="store_true", help="Build with console for debugging")
     parser.add_argument("--icon", help="Path to custom icon file")
-    parser.add_argument("--name", default="CustomCursorApp", help="Name of the output executable")
+    parser.add_argument("--name", default="Custom Cursors", help="Name of the output executable")
     parser.add_argument("--optimize", action="store_true", default=True, help="Apply size optimizations")
     parser.add_argument("--skip-security-fix", action="store_true", help="Skip macOS security fixes")
     args = parser.parse_args()
     
-    # Ensure PyInstaller is installed
-    try:
-        import PyInstaller
-    except ImportError:
-        print("PyInstaller not found. Installing...")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
-    
     # Determine platform
     system = platform.system()
+    
+    # Ensure PyInstaller is installed with the fix for PyQt6 6.5+ on macOS
+    try:
+        import PyInstaller
+        # Check if we're on macOS and need the special PyQt6 fix
+        if system == "Darwin":
+            print("Installing fixed PyInstaller version for PyQt6 6.5+ on macOS...")
+            # Uninstall current PyInstaller
+            subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "-y", "pyinstaller"])
+            # Install the development version with bootloader recompilation
+            env = os.environ.copy()
+            env["PYINSTALLER_COMPILE_BOOTLOADER"] = "1"
+            subprocess.check_call([sys.executable, "-m", "pip", "install", 
+                                  "git+https://github.com/pyinstaller/pyinstaller.git@develop"],
+                                 env=env)
+            print("Fixed PyInstaller version installed successfully")
+    except ImportError:
+        print("PyInstaller not found. Installing fixed version...")
+        if system == "Darwin":
+            # Install the development version with bootloader recompilation
+            env = os.environ.copy()
+            env["PYINSTALLER_COMPILE_BOOTLOADER"] = "1"
+            subprocess.check_call([sys.executable, "-m", "pip", "install", 
+                                  "git+https://github.com/pyinstaller/pyinstaller.git@develop"],
+                                 env=env)
+        else:
+            # On other platforms, just install the regular version
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
+    
+    # System platform was already determined above
     
     # Create dist directory if it doesn't exist
     dist_dir = Path("dist")
@@ -220,12 +243,12 @@ def main():
         build_cmd.extend(["--add-binary", "venv/Lib/site-packages/PyQt6/Qt6/bin/*:PyQt6/Qt6/bin/"])
     elif system == "Darwin":  # macOS
         print("Building for macOS...")
-        # Add macOS-specific options with minimal Qt libraries
+        # Add macOS-specific options - preserve Qt frameworks for PyQt6 6.5+
         build_cmd.extend([
-            # Only include essential Qt libraries
-            "--add-binary", "venv/lib/python*/site-packages/PyQt6/Qt6/lib/QtCore.framework/Versions/A/QtCore:PyQt6/Qt6/lib/QtCore.framework/Versions/A/",
-            "--add-binary", "venv/lib/python*/site-packages/PyQt6/Qt6/lib/QtGui.framework/Versions/A/QtGui:PyQt6/Qt6/lib/QtGui.framework/Versions/A/",
-            "--add-binary", "venv/lib/python*/site-packages/PyQt6/Qt6/lib/QtWidgets.framework/Versions/A/QtWidgets:PyQt6/Qt6/lib/QtWidgets.framework/Versions/A/",
+            # Use the --collect-all option to properly collect Qt frameworks
+            "--collect-all", "PyQt6.QtCore",
+            "--collect-all", "PyQt6.QtGui",
+            "--collect-all", "PyQt6.QtWidgets",
             # Add only essential plugins
             "--add-binary", "venv/lib/python*/site-packages/PyQt6/Qt6/plugins/platforms/libqcocoa.dylib:PyQt6/Qt6/plugins/platforms/",
             "--add-binary", "venv/lib/python*/site-packages/PyQt6/Qt6/plugins/styles/libqmacstyle.dylib:PyQt6/Qt6/plugins/styles/"
@@ -240,7 +263,7 @@ def main():
 <plist version="1.0">
 <dict>
     <key>CFBundleDisplayName</key>
-    <string>Custom Cursor App</string>
+    <string>Custom Cursors</string>
     <key>CFBundleIdentifier</key>
     <string>com.customcursor.app</string>
     <key>CFBundleVersion</key>
@@ -364,7 +387,7 @@ def main():
             # For single file executable
             if os.path.exists(f"dist/{args.name}"):
                 print(f"Adding execute permissions to {args.name}")
-                subprocess.run(["chmod", "+x", f"dist/{args.name}"], check=False)
+                subprocess.run(["chmod", "+x", f"dist/{args.name}"], check=True)
                 
                 # Remove quarantine attribute
                 print("Removing quarantine attribute")
@@ -373,15 +396,29 @@ def main():
             # For app bundle
             if os.path.exists(f"dist/{args.name}.app"):
                 print(f"Adding execute permissions to {args.name}.app")
-                subprocess.run(["chmod", "-R", "+x", f"dist/{args.name}.app"], check=False)
+                subprocess.run(["chmod", "-R", "+x", f"dist/{args.name}.app"], check=True)
                 
                 # Remove quarantine attribute
                 print("Removing quarantine attribute")
                 subprocess.run(["xattr", "-d", "com.apple.quarantine", f"dist/{args.name}.app"], check=False)
                 
-                # Ad-hoc signing (doesn't require a developer certificate)
-                print("Applying ad-hoc code signing")
-                subprocess.run(["codesign", "--force", "--deep", "--sign", "-", f"dist/{args.name}.app"], check=False)
+                # Fix permissions for all executables in the app bundle
+                print("Setting proper permissions for all executables")
+                for root, dirs, files in os.walk(f"dist/{args.name}.app"):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        if os.access(file_path, os.X_OK):
+                            subprocess.run(["chmod", "+x", file_path], check=True)
+                
+                # More thorough ad-hoc signing without entitlements
+                print("Applying enhanced ad-hoc code signing")
+                subprocess.run([
+                    "codesign", 
+                    "--force", 
+                    "--deep", 
+                    "--sign", "-", 
+                    f"dist/{args.name}.app"
+                ], check=True)
         except Exception as e:
             print(f"Warning: Could not fix macOS security attributes: {e}")
     
@@ -403,25 +440,140 @@ def main():
                 except Exception as e:
                     print(f"Warning: Could not update Info.plist: {e}")
                     
-            # Create an optimized DMG file
-            print("\nCreating optimized DMG file...")
+            # Create a professionally formatted DMG file with Applications shortcut and instructions
+            print("\nCreating enhanced DMG file with Applications shortcut and instructions...")
             try:
-                # First try with maximum compression using UDBZ format
+                # Create temporary directory for DMG contents
+                dmg_temp_dir = Path("dmg_temp")
+                if dmg_temp_dir.exists():
+                    shutil.rmtree(dmg_temp_dir)
+                dmg_temp_dir.mkdir(exist_ok=True)
+                
+                # Copy the app to the temporary directory
+                print("Copying app to temporary directory...")
+                shutil.copytree(output_file, dmg_temp_dir / os.path.basename(output_file), symlinks=True, dirs_exist_ok=True)
+                
+                # Apply additional code signing to the copied app
+                print("Applying additional code signing to the app in DMG...")
+                copied_app = dmg_temp_dir / os.path.basename(output_file)
+                subprocess.run([
+                    "codesign", 
+                    "--force", 
+                    "--deep", 
+                    "--sign", "-", 
+                    str(copied_app)
+                ], check=True)
+                
+                # Create a symbolic link to /Applications
+                applications_link = dmg_temp_dir / "Applications"
+                if applications_link.exists():
+                    os.unlink(applications_link)
+                os.symlink("/Applications", applications_link)
+                
+                # Create a background image for the DMG
+                print("Creating DMG background image with installation instructions...")
+                backgrounds_dir = dmg_temp_dir / ".background"
+                backgrounds_dir.mkdir(exist_ok=True)
+                
+                # Create a simple background image with instructions
+                from PIL import Image, ImageDraw, ImageFont
+                
+                # Create a background image with instructions
+                bg_img = Image.new('RGBA', (600, 400), color=(240, 240, 240, 255))
+                draw = ImageDraw.Draw(bg_img)
+                
+                # Try to use a nice font if available, otherwise use default
+                try:
+                    # Check for common macOS fonts
+                    font_path = "/System/Library/Fonts/Supplemental/Arial.ttf"
+                    if not os.path.exists(font_path):
+                        font_path = "/System/Library/Fonts/Helvetica.ttc"
+                    
+                    title_font = ImageFont.truetype(font_path, 24)
+                    instruction_font = ImageFont.truetype(font_path, 16)
+                except Exception:
+                    # Use default font if custom font fails
+                    title_font = None
+                    instruction_font = None
+                
+                # Draw title
+                draw.text((300, 30), "Install Custom Cursors", fill=(50, 50, 50), font=title_font, anchor="mt")
+                
+                # Draw arrow pointing from app to Applications folder
+                arrow_points = [
+                    (230, 200),  # Start
+                    (370, 200),  # End
+                    (350, 190),  # Arrow head top
+                    (370, 200),  # Arrow head point
+                    (350, 210)   # Arrow head bottom
+                ]
+                draw.line(arrow_points[:2], fill=(66, 191, 191), width=3)
+                draw.polygon(arrow_points[2:], fill=(66, 191, 191))
+                
+                # Draw instructions
+                instructions = "Drag Custom Cursors to the Applications folder"
+                draw.text((300, 240), instructions, fill=(50, 50, 50), font=instruction_font, anchor="mt")
+                
+                # Add security note
+                security_note = "After installation, right-click (or Control+click) on the app\nand select 'Open' to bypass the security warning."
+                draw.text((300, 300), security_note, fill=(100, 100, 100), font=instruction_font, anchor="mt", align="center")
+                
+                # Save the background image
+                bg_path = backgrounds_dir / "background.png"
+                bg_img.save(bg_path)
+                
+                # Create a DMG setup file to configure the appearance
+                print("Creating DMG appearance settings...")
+                
+                # Create a custom Apple Script to set the DMG appearance
+                applescript = f'''
+                tell application "Finder"
+                    tell disk "Custom Cursors"
+                        open
+                        set current view of container window to icon view
+                        set toolbar visible of container window to false
+                        set statusbar visible of container window to false
+                        set the bounds of container window to {{100, 100, 700, 500}}
+                        set theViewOptions to the icon view options of container window
+                        set arrangement of theViewOptions to not arranged
+                        set icon size of theViewOptions to 80
+                        set background picture of theViewOptions to file ".background:background.png"
+                        set position of item "{os.path.basename(output_file)}" of container window to {{150, 200}}
+                        set position of item "Applications" of container window to {{450, 200}}
+                        update without registering applications
+                        delay 5
+                        close
+                    end tell
+                end tell
+                '''
+                
+                # Save the AppleScript
+                script_path = Path("dmg_setup.applescript")
+                with open(script_path, "w") as f:
+                    f.write(applescript)
+                
+                # Create the DMG file with standard format (UDZO is more compatible)
                 dmg_path = f"dist/{args.name}.dmg"
+                print(f"Creating DMG at {dmg_path}...")
                 subprocess.run([
                     "hdiutil", "create", 
-                    "-volname", "Custom Cursor App", 
-                    "-srcfolder", output_file,
-                    "-ov", "-format", "UDBZ",  # Use bzip2 compression (best compression)
+                    "-volname", "Custom Cursors", 
+                    "-srcfolder", dmg_temp_dir,
+                    "-ov", "-format", "UDZO",  # Use zlib compression (more compatible)
+                    "-fs", "HFS+",
                     dmg_path
                 ], check=True)
-                print(f"Created optimized DMG: {dmg_path}")
+                
+                # Remove quarantine attribute from the DMG itself
+                print("Removing quarantine attribute from DMG...")
+                subprocess.run(["xattr", "-d", "com.apple.quarantine", dmg_path], check=False)
+                print(f"Created DMG: {dmg_path}")
                 
                 # Report the size of the DMG
                 dmg_size = os.path.getsize(dmg_path) / (1024 * 1024)  # Convert to MB
                 print(f"DMG size: {dmg_size:.2f} MB")
             except Exception as e:
-                print(f"Warning: Could not create optimized DMG: {e}")
+                print(f"Warning: Could not create DMG: {e}")
         else:
             output_file = f"dist/{args.name}"
         zip_file = f"dist/{args.name}_macOS.zip"
@@ -435,13 +587,22 @@ IMPORTANT INSTRUCTIONS FOR MACOS USERS
 
 If you see a message that the app is damaged or can't be opened:
 
+Method 1: Using Terminal
+-----------------------
 1. Open Terminal (Applications > Utilities > Terminal)
 2. Run the following command (copy and paste the entire line):
-   xattr -d com.apple.quarantine /path/to/CustomCursorApp.app
+   xattr -d com.apple.quarantine /path/to/Custom\ Cursors.app
    
    (Replace /path/to/CustomCursorApp.app with the actual path to the app)
 
 3. Try opening the app again
+
+Method 2: Using System Settings
+----------------------------
+1. Go to System Settings > Privacy & Security
+2. Scroll down to the "Security" section
+3. Look for a message about "Custom Cursors" being blocked
+4. Click "Open Anyway" and confirm
 
 This is necessary because macOS has strict security measures for apps not from the App Store.
 ''')
