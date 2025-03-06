@@ -50,5 +50,7 @@ env.bak/
 venv.bak/
 
 # Build artifacts
-*.dmg
 *.app
+
+# Allow DMG files in the website/downloads directory
+!website/downloads/*.dmg
